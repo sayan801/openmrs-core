@@ -223,8 +223,14 @@
 		          <dependency>
 		            <groupId>org.apache.tomcat.embed</groupId>
 		            <artifactId>tomcat-embed-logging-log4j</artifactId>
-		            <version>${tomcat.version}</version>
-		          </dependency>
+ 		            <version>${tomcat.version}</version>
+      		    </dependency>
+		    <dependency>
+                      <groupId>org.postgresql</groupId>
+                      <artifactId>postgresql</artifactId>
+                      <version>42.2.27</version>
+                    </dependency>
+
         		</dependencies>
          </plugin>
 		  <plugin>
