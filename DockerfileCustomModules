@@ -1,0 +1,69 @@
+# syntax=docker/dockerfile:1
+
+############################
+# 1. Build Stage
+############################
+FROM technicise/openmrs-core:2.7.4 AS build
+WORKDIR /openmrs_distro
+
+# Maven settings and profile for distro build
+ARG MVN_ARGS_SETTINGS="-s /usr/share/maven/ref/settings-docker.xml -U -P distro"
+ARG MVN_ARGS="install"
+
+# Copy build files
+COPY pom.xml ./
+COPY distro ./distro/
+
+# Optional: Copy in any extra modules, OWAs, or config before build
+# This way you don't need to modify distro/pom.xml for local modules
+# (Only works if the distro build process is picking up local artifacts)
+COPY custom_omods ./custom_omods/
+COPY custom_owas ./custom_owas/
+COPY custom_config ./custom_config/
+
+# Build distro (skip deploy on non-amd64)
+RUN --mount=type=secret,id=m2settings,target=/usr/share/maven/ref/settings-docker.xml \
+    if [[ "$MVN_ARGS" != "deploy" || "$(arch)" = "x86_64" ]]; then \
+        mvn $MVN_ARGS_SETTINGS $MVN_ARGS; \
+    else \
+        mvn $MVN_ARGS_SETTINGS install; \
+    fi
+
+# Copy built artifacts to /openmrs/distribution/
+RUN mkdir -p /openmrs/distribution/openmrs_core \
+    && cp /openmrs_distro/distro/target/sdk-distro/web/openmrs_core/openmrs.war /openmrs/distribution/openmrs_core/ \
+    && cp /openmrs_distro/distro/target/sdk-distro/web/openmrs-distro.properties /openmrs/distribution/ \
+    && cp -R /openmrs_distro/distro/target/sdk-distro/web/openmrs_modules /openmrs/distribution/openmrs_modules/ \
+    && cp -R /openmrs_distro/distro/target/sdk-distro/web/openmrs_owas /openmrs/distribution/openmrs_owas/ \
+    && cp -R /openmrs_distro/distro/target/sdk-distro/web/openmrs_config /openmrs/distribution/openmrs_config/
+
+# Add custom modules and configuration (if provided)
+RUN if [ -d "./custom_omods" ]; then \
+        cp ./custom_omods/*.omod /openmrs/distribution/openmrs_modules/ || true; \
+    fi \
+    && if [ -d "./custom_owas" ]; then \
+        cp -R ./custom_owas/* /openmrs/distribution/openmrs_owas/ || true; \
+    fi \
+    && if [ -d "./custom_config" ]; then \
+        cp -R ./custom_config/* /openmrs/distribution/openmrs_config/ || true; \
+    fi
+
+# Clean up Maven build files
+RUN mvn $MVN_ARGS_SETTINGS clean
+
+############################
+# 2. Production Stage
+############################
+FROM technicise/openmrs-core:2.7.4
+
+# Copy artifacts from build stage
+COPY --from=build /openmrs/distribution/openmrs_core/openmrs.war /openmrs/distribution/openmrs_core/
+COPY --from=build /openmrs/distribution/openmrs-distro.properties /openmrs/distribution/
+COPY --from=build /openmrs/distribution/openmrs_modules /openmrs/distribution/openmrs_modules
+COPY --from=build /openmrs/distribution/openmrs_owas /openmrs/distribution/openmrs_owas
+COPY --from=build /openmrs/distribution/openmrs_config /openmrs/distribution/openmrs_config
+
+EXPOSE 8080
+
+# Use the startup script from base image
+CMD ["/openmrs/startup.sh"]
