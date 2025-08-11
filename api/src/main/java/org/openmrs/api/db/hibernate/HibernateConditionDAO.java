@@ -9,7 +9,7 @@
  */
 package org.openmrs.api.db.hibernate;
 
-import jakarta.persistence.TypedQuery;
+import javax.persistence.TypedQuery;
 import java.util.Arrays;
 import java.util.List;
 

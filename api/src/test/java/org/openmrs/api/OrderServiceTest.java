@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.openmrs.Allergy;
 import org.openmrs.CareSetting;
 import org.openmrs.Concept;
-import org.openmrs.ConceptAnswer;
 import org.openmrs.ConceptClass;
 import org.openmrs.ConceptDatatype;
 import org.openmrs.ConceptDescription;
@@ -30,15 +29,12 @@ import org.openmrs.ConceptMap;
 import org.openmrs.ConceptMapType;
 import org.openmrs.ConceptName;
 import org.openmrs.ConceptReferenceTerm;
-import org.openmrs.ConceptSource;
 import org.openmrs.Condition;
 import org.openmrs.Diagnosis;
 import org.openmrs.Drug;
-import org.openmrs.DrugReferenceMap;
 import org.openmrs.DrugIngredient;
 import org.openmrs.DrugOrder;
 import org.openmrs.Encounter;
-import org.openmrs.EncounterRole;
 import org.openmrs.FreeTextDosingInstructions;
 import org.openmrs.GlobalProperty;
 import org.openmrs.Location;
@@ -57,32 +53,26 @@ import org.openmrs.OrderSet;
 import org.openmrs.OrderType;
 import org.openmrs.Patient;
 import org.openmrs.PatientIdentifierType;
-import org.openmrs.PatientProgram;
 import org.openmrs.PatientState;
 import org.openmrs.PersonAddress;
 import org.openmrs.PersonAttributeType;
 import org.openmrs.ProgramAttributeType;
 import org.openmrs.Provider;
 import org.openmrs.ProviderAttributeType;
-import org.openmrs.ProviderRole;
 import org.openmrs.Relationship;
 import org.openmrs.SimpleDosingInstructions;
 import org.openmrs.TestOrder;
 import org.openmrs.User;
 import org.openmrs.Visit;
-import org.openmrs.VisitType;
 import org.openmrs.VisitAttributeType;
-import org.openmrs.FormResource;
 import org.openmrs.api.builder.DrugOrderBuilder;
 import org.openmrs.api.builder.OrderBuilder;
 import org.openmrs.api.context.Context;
-import org.openmrs.api.db.ClobDatatypeStorage;
 import org.openmrs.api.db.SerializedObject;
 import org.openmrs.api.db.hibernate.HibernateAdministrationDAO;
 import org.openmrs.api.db.hibernate.HibernateSessionFactoryBean;
 import org.openmrs.api.impl.OrderServiceImpl;
 import org.openmrs.customdatatype.datatype.FreeTextDatatype;
-import org.openmrs.hl7.HL7InArchive;
 import org.openmrs.hl7.HL7InError;
 import org.openmrs.messagesource.MessageSourceService;
 import org.openmrs.notification.AlertRecipient;
@@ -91,7 +81,6 @@ import org.openmrs.order.OrderUtilTest;
 import org.openmrs.orders.TimestampOrderNumberGenerator;
 import org.openmrs.parameter.OrderSearchCriteria;
 import org.openmrs.parameter.OrderSearchCriteriaBuilder;
-import org.openmrs.person.PersonMergeLog;
 import org.openmrs.test.TestUtil;
 import org.openmrs.test.jupiter.BaseContextSensitiveTest;
 import org.openmrs.util.DateUtil;
@@ -105,7 +94,6 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Collections;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.HashSet;
@@ -267,7 +255,7 @@ public class OrderServiceTest extends BaseContextSensitiveTest {
 		throws InterruptedException {
 
 		int N = 50;
-		final Set<String> uniqueOrderNumbers = Collections.synchronizedSet(new HashSet<String>(50));
+		final Set<String> uniqueOrderNumbers = new HashSet<>(50);
 		List<Thread> threads = new ArrayList<>();
 		for (int i = 0; i < N; i++) {
 			threads.add(new Thread(() -> {
@@ -2732,39 +2720,27 @@ public class OrderServiceTest extends BaseContextSensitiveTest {
 			.configure().applySettings(configuration.getProperties()).build();
 
 		Metadata metaData = new MetadataSources(standardRegistry).addAnnotatedClass(Allergy.class)
-				.addAnnotatedClass(Encounter.class).addAnnotatedClass(SomeTestOrder.class)
-				.addAnnotatedClass(Diagnosis.class).addAnnotatedClass(Condition.class)
-				.addAnnotatedClass(Visit.class).addAnnotatedClass(VisitAttributeType.class)
-				.addAnnotatedClass(MedicationDispense.class)
-				.addAnnotatedClass(ProviderAttributeType.class)
-				.addAnnotatedClass(ConceptMapType.class)
-				.addAnnotatedClass(Relationship.class)
-				.addAnnotatedClass(Location.class)
-				.addAnnotatedClass(PersonAddress.class)
-				.addAnnotatedClass(PersonAttributeType.class)
-				.addAnnotatedClass(User.class)
-				.addAnnotatedClass(LocationAttributeType.class)
-				.addAnnotatedClass(SerializedObject.class)
-				.addAnnotatedClass(PatientState.class)
-				.addAnnotatedClass(DrugIngredient.class)
-				.addAnnotatedClass(DrugReferenceMap.class)
-				.addAnnotatedClass(AlertRecipient.class)
-				.addAnnotatedClass(PatientIdentifierType.class)
-				.addAnnotatedClass(ProgramAttributeType.class)
-				.addAnnotatedClass(HL7InError.class)
-				.addAnnotatedClass(OrderType.class)
-				.addAnnotatedClass(ConceptAnswer.class)
-				.addAnnotatedClass(ConceptClass.class)
-				.addAnnotatedClass(FormResource.class)
-				.addAnnotatedClass(VisitType.class)
-				.addAnnotatedClass(ProviderRole.class)
-				.addAnnotatedClass(EncounterRole.class)
-				.addAnnotatedClass(PatientProgram.class)
-				.addAnnotatedClass(HL7InArchive.class)
-				.addAnnotatedClass(PersonMergeLog.class)
-				.addAnnotatedClass(ClobDatatypeStorage.class)
-        .addAnnotatedClass(ConceptSource.class)
-				.getMetadataBuilder().build();
+			.addAnnotatedClass(Encounter.class).addAnnotatedClass(SomeTestOrder.class)
+			.addAnnotatedClass(Diagnosis.class).addAnnotatedClass(Condition.class)
+			.addAnnotatedClass(Visit.class).addAnnotatedClass(VisitAttributeType.class)
+			.addAnnotatedClass(MedicationDispense.class)
+			.addAnnotatedClass(ProviderAttributeType.class)
+			.addAnnotatedClass(ConceptMapType.class)
+			.addAnnotatedClass(Relationship.class)
+			.addAnnotatedClass(Location.class)
+			.addAnnotatedClass(PersonAddress.class)
+			.addAnnotatedClass(PersonAttributeType.class)
+			.addAnnotatedClass(User.class)
+			.addAnnotatedClass(LocationAttributeType.class)
+			.addAnnotatedClass(SerializedObject.class)
+			.addAnnotatedClass(PatientState.class)
+			.addAnnotatedClass(DrugIngredient.class)
+			.addAnnotatedClass(AlertRecipient.class)
+			.addAnnotatedClass(PatientIdentifierType.class)
+			.addAnnotatedClass(ProgramAttributeType.class)
+			.addAnnotatedClass(HL7InError.class)
+			.addAnnotatedClass(OrderType.class)
+			.getMetadataBuilder().build();
 
 
 		Field field = adminDAO.getClass().getDeclaredField("metadata");
@@ -3467,34 +3443,6 @@ public class OrderServiceTest extends BaseContextSensitiveTest {
 		DrugOrder saveOrder = (DrugOrder) orderService.saveOrder(order, null);
 		assertTrue(saveOrder.getAsNeeded());
 		assertNotNull(orderService.getOrder(saveOrder.getOrderId()));
-	}
-	
-	/**
-	 * @see org.openmrs.api.OrderService#saveOrder(Order, OrderContext)
-	 */
-	@Test
-	public void saveOrder_shouldSetNonCodedDrugOrderConcept() {
-		executeDataSet("org/openmrs/api/include/OrderServiceTest-nonCodedDrugs.xml");
-
-		DrugOrder drugOrder = new DrugOrder();
-		drugOrder.setDateActivated(new Date());
-		drugOrder.setDrugNonCoded("non coded paracetamol");
-		drugOrder.setOrderType(orderService.getOrderTypeByName("Drug order"));
-		drugOrder.setEncounter(encounterService.getEncounter(3));
-		drugOrder.setPatient(patientService.getPatient(7));
-		drugOrder.setCareSetting(orderService.getCareSetting(1));
-		drugOrder.setOrderer(providerService.getProvider(1));
-		drugOrder.setDoseUnits(conceptService.getConcept(50));
-		drugOrder.setQuantityUnits(conceptService.getConcept(51));
-		drugOrder.setFrequency(orderService.getOrderFrequency(3));
-		drugOrder.setRoute(conceptService.getConcept(22));
-		drugOrder.setDosingType(SimpleDosingInstructions.class);
-		drugOrder.setNumRefills(10);
-		drugOrder.setDose(300.0);
-		drugOrder.setQuantity(20.0);
-
-		orderService.saveOrder(drugOrder, null);
-		assertNotNull(drugOrder.getConcept());
 	}
 
 	@Test

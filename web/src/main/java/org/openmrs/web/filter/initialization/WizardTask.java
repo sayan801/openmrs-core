@@ -21,6 +21,7 @@ public enum WizardTask {
 	CREATE_TABLES("install.progress.tasks.create.tables"),
 	ADD_CORE_DATA("install.progress.tasks.add.coreData"),
 	
+	ADD_DEMO_DATA("install.progress.tasks.add.demoData"),
 	UPDATE_TO_LATEST("install.progress.tasks.update"),
 	
 	IMPORT_TEST_DATA("install.progress.tasks.test"),

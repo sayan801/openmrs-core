@@ -9,13 +9,10 @@
  */
 package org.openmrs;
 
-import jakarta.persistence.Cacheable;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.hibernate.annotations.Cache;
-import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.envers.Audited;
 import org.openmrs.util.RoleConstants;
 import org.slf4j.Logger;
@@ -29,8 +26,6 @@ import org.slf4j.LoggerFactory;
  *
  * @see Privilege
  */
-@Cacheable
-@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 @Audited
 public class Role extends BaseChangeableOpenmrsMetadata {
 	

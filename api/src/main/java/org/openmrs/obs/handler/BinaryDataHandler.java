@@ -9,20 +9,18 @@
  */
 package org.openmrs.obs.handler;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.openmrs.Obs;
 import org.openmrs.api.APIException;
-import org.openmrs.api.storage.ObjectMetadata;
 import org.openmrs.obs.ComplexData;
 import org.openmrs.obs.ComplexObsHandler;
+import org.openmrs.util.OpenmrsUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 
 /**
@@ -31,7 +29,6 @@ import org.springframework.util.Assert;
  * 
  * @since 1.5
  */
-@Component
 public class BinaryDataHandler extends AbstractHandler implements ComplexObsHandler {
 	
 	/** Views supported by this handler */
@@ -54,10 +51,9 @@ public class BinaryDataHandler extends AbstractHandler implements ComplexObsHand
 	 */
 	@Override
 	public Obs getObs(Obs obs, String view) {
-		String key = parseDataKey(obs);
-		
-		log.debug("value complex: {}", obs.getValueComplex());
-		log.debug("file path: {}", key);
+		File file = getComplexDataFile(obs);
+		log.debug("value complex: " + obs.getValueComplex());
+		log.debug("file path: " + file.getAbsolutePath());
 		ComplexData complexData = null;
 		
 		// Raw view (i.e. the file as is)
@@ -66,14 +62,13 @@ public class BinaryDataHandler extends AbstractHandler implements ComplexObsHand
 			// also need to remove the "file" text appended to the end of the file name
 			String[] names = obs.getValueComplex().split("\\|");
 			String originalFilename = names[0];
-			originalFilename = originalFilename.replaceAll(",", "")
-				.replaceAll(" ", "").replaceAll("file$", "");
+			originalFilename = originalFilename.replaceAll(",", "").replaceAll(" ", "").replaceAll("file$", "");
 			
-			try (InputStream in = storageService.getData(key)){
-				complexData = new ComplexData(originalFilename, IOUtils.toByteArray(in));
+			try {
+				complexData = new ComplexData(originalFilename, OpenmrsUtil.getFileAsBytes(file));
 			}
 			catch (IOException e) {
-				log.error("Trying to read file: {}", key, e);
+				log.error("Trying to read file: " + file.getAbsolutePath(), e);
 			}
 		} else {
 			// No other view supported
@@ -83,7 +78,10 @@ public class BinaryDataHandler extends AbstractHandler implements ComplexObsHand
 		
 		Assert.notNull(complexData, "Complex data must not be null");
 		
-		injectMissingMetadata(key, complexData);
+		// Get the Mime Type and set it
+		String mimeType = OpenmrsUtil.getFileMimeType(file);
+		complexData.setMimeType(mimeType);
+		
 		obs.setComplexData(complexData);
 		
 		return obs;
@@ -107,33 +105,44 @@ public class BinaryDataHandler extends AbstractHandler implements ComplexObsHand
 		// Get the buffered file  from the ComplexData.
 		ComplexData complexData = obs.getComplexData();
 		if (complexData == null) {
-			log.error("Cannot save complex data where obsId={} because its ComplexData is null.", obs.getObsId());
+			log.error("Cannot save complex data where obsId=" + obs.getObsId() + " because its ComplexData is null.");
 			return obs;
 		}
+		
+		FileOutputStream fout = null;
 		try {
-			Object data = obs.getComplexData().getData();
-			ObjectMetadata metadata = new ObjectMetadata();
-			if (data instanceof byte[]) {
-				metadata.setLength((long) ((byte[]) data).length);	
-			}
-			metadata.setFilename(obs.getComplexData().getTitle());
+			File outfile = getOutputFileToWrite(obs);
+			fout = new FileOutputStream(outfile);
 			
-			String key = storageService.saveData(outputStream -> {
-				if (data instanceof byte[]) {
-					IOUtils.write((byte[]) data, outputStream);
-				} else if (InputStream.class.isAssignableFrom(data.getClass())) {
-					IOUtils.copy((InputStream) data, outputStream);
+			Object data = obs.getComplexData().getData();
+			if (data instanceof byte[]) {
+				fout.write((byte[]) data);
+			} else if (InputStream.class.isAssignableFrom(data.getClass())) {
+				try {
+					OpenmrsUtil.copyFile((InputStream) data, fout);
 				}
-				outputStream.flush();
-			}, metadata, getObsDir());
-
+				catch (IOException e) {
+					throw new APIException("Obs.error.unable.convert.complex.data", new Object[] { "input stream" }, e);
+				}
+			}
+			
 			// Set the Title and URI for the valueComplex
-			obs.setValueComplex(StringUtils.defaultIfBlank(obs.getComplexData().getTitle(), key) + " file |" + key);
-
+			obs.setValueComplex(outfile.getName() + " file |" + outfile.getName());
+			
 			// Remove the ComplexData from the Obs
 			obs.setComplexData(null);
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
+			
+		}
+		catch (IOException ioe) {
+			throw new APIException("Obs.error.trying.write.complex", null, ioe);
+		}
+		finally {
+			try {
+				fout.close();
+			}
+			catch (Exception e) {
+				// pass
+			}
 		}
 		
 		return obs;

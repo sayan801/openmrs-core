@@ -32,7 +32,7 @@ import org.openmrs.util.OpenmrsConstants;
 import org.openmrs.util.OpenmrsUtil;
 import org.slf4j.LoggerFactory;
 
-import jakarta.validation.constraints.NotNull;
+import javax.validation.constraints.NotNull;
 import java.io.File;
 import java.net.URI;
 import java.util.ArrayList;
@@ -100,21 +100,18 @@ public class OpenmrsConfigurationFactory extends ConfigurationFactory {
 	
 	@Override
 	public Configuration getConfiguration(LoggerContext loggerContext, ConfigurationSource source) {
-		if (source != null && source.getLocation() != null) {
-			switch (FilenameUtils.getExtension(source.getLocation()).toLowerCase(Locale.ROOT)) {
-				case "xml":
-					return new OpenmrsXmlConfiguration(loggerContext, source);
-				case "yaml":
-				case "yml":
-					return new OpenmrsYamlConfiguration(loggerContext, source);
-				case "json":
-					return new OpenmrsJsonConfiguration(loggerContext, source);
-				default:
-					throw new IllegalArgumentException(
-						OpenmrsConfigurationFactory.class.getName() + " does not know how to handle source " + source.getFile());
-			}
+		switch (FilenameUtils.getExtension(source.getLocation()).toLowerCase(Locale.ROOT)) {
+			case "xml":
+				return new OpenmrsXmlConfiguration(loggerContext, source);
+			case "yaml":
+			case "yml":
+				return new OpenmrsYamlConfiguration(loggerContext, source);
+			case "json":
+				return new OpenmrsJsonConfiguration(loggerContext, source);
+			default:
+				throw new IllegalArgumentException(
+					OpenmrsConfigurationFactory.class.getName() + " does not know how to handle source " + source.getFile());
 		}
-		return null;
 	}
 	
 	@Override

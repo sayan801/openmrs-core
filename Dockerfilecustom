@@ -1,0 +1,5 @@
+FROM technicise/openmrs-core:2.7.4
+
+# Copy custom omods into the actual runtime module directory
+COPY ./custom_omods/*.omod /openmrs/data/modules/
+

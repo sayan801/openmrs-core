@@ -9,10 +9,11 @@
  */
 package org.openmrs.api.impl;
 
-import java.util.ArrayList;
+import java.io.File;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
 import org.openmrs.Concept;
@@ -33,6 +34,7 @@ import org.openmrs.api.db.ObsDAO;
 import org.openmrs.api.handler.SaveHandler;
 import org.openmrs.obs.ComplexData;
 import org.openmrs.obs.ComplexObsHandler;
+import org.openmrs.obs.handler.AbstractHandler;
 import org.openmrs.util.OpenmrsClassLoader;
 import org.openmrs.util.OpenmrsConstants.PERSON_TYPE;
 import org.openmrs.util.OpenmrsUtil;
@@ -133,8 +135,8 @@ public class ObsServiceImpl extends BaseOpenmrsService implements ObsService {
 			obs = Context.getObsService().getObs(obs.getObsId());
 			//delete the previous file from the appdata/complex_obs folder
 			if (newObs.hasPreviousVersion() && newObs.getPreviousVersion().isComplex()) {
-				ComplexObsHandler handler = getHandler(newObs.getPreviousVersion());
-				handler.purgeComplexData(newObs.getPreviousVersion());
+				File previousFile = AbstractHandler.getComplexDataFile(obs);
+				previousFile.delete();
 			}
 			// calling this via the service so that AOP hooks are called
 			Context.getObsService().voidObs(obs, changeMessage);
@@ -203,7 +205,6 @@ public class ObsServiceImpl extends BaseOpenmrsService implements ObsService {
 		}
 
 		if(refreshNeeded) {
-			Context.flushSession();
 			Context.refreshEntity(obs);
 		}
 		return obs;

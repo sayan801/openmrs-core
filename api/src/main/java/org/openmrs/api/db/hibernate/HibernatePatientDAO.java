@@ -21,24 +21,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import jakarta.persistence.TemporalType;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Join;
-import jakarta.persistence.criteria.Order;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.hibernate.Session;
+import org.hibernate.Criteria;
+import org.hibernate.Query;
+import org.hibernate.SQLQuery;
 import org.hibernate.SessionFactory;
-import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.criterion.Order;
+import org.hibernate.criterion.Restrictions;
 import org.hibernate.persister.entity.AbstractEntityPersister;
-import org.hibernate.query.MutationQuery;
-import org.hibernate.query.NativeQuery;
-import org.hibernate.query.Query;
-import org.hibernate.search.engine.search.predicate.SearchPredicate;
-import org.hibernate.search.engine.search.predicate.dsl.SearchPredicateFactory;
 import org.openmrs.Allergies;
 import org.openmrs.Allergy;
 import org.openmrs.Location;
@@ -53,8 +44,8 @@ import org.openmrs.PersonName;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.db.DAOException;
 import org.openmrs.api.db.PatientDAO;
-import org.openmrs.api.db.hibernate.search.SearchQueryUnique;
-import org.openmrs.api.db.hibernate.search.session.SearchSessionFactory;
+import org.openmrs.api.db.hibernate.search.LuceneQuery;
+import org.openmrs.collection.ListPart;
 import org.openmrs.util.OpenmrsConstants;
 import org.openmrs.util.OpenmrsUtil;
 import org.slf4j.Logger;
@@ -76,8 +67,6 @@ public class HibernatePatientDAO implements PatientDAO {
 	 */
 	private SessionFactory sessionFactory;
 	
-	private SearchSessionFactory searchSessionFactory;
-	
 	/**
 	 * Set session factory
 	 *
@@ -85,10 +74,6 @@ public class HibernatePatientDAO implements PatientDAO {
 	 */
 	public void setSessionFactory(SessionFactory sessionFactory) {
 		this.sessionFactory = sessionFactory;
-	}
-
-	public void setSearchSessionFactory(SearchSessionFactory searchSessionFactory) {
-		this.searchSessionFactory = searchSessionFactory;
 	}
 
 	/**
@@ -147,8 +132,8 @@ public class HibernatePatientDAO implements PatientDAO {
 		if (patient.getPatientId() != null) {
 			// check if there is a row with a matching patient.patient_id
 			String sql = "SELECT 1 FROM patient WHERE patient_id = :patientId";
-			NativeQuery<Integer> query = sessionFactory.getCurrentSession().createNativeQuery(sql, Integer.class);
-			query.setParameter("patientId", patient.getPatientId());
+			Query query = sessionFactory.getCurrentSession().createSQLQuery(sql);
+			query.setInteger("patientId", patient.getPatientId());
 			
 			stubInsertNeeded = (query.uniqueResult() == null);
 		}
@@ -164,11 +149,11 @@ public class HibernatePatientDAO implements PatientDAO {
 			}
 			
 			String insert = "INSERT INTO patient (patient_id, creator, voided, date_created) VALUES (:patientId, :creator, :voided, :dateCreated)";
-			MutationQuery query = sessionFactory.getCurrentSession().createNativeMutationQuery(insert);
-			query.setParameter("patientId", patient.getPatientId());
-			query.setParameter("creator", patient.getCreator().getUserId());
-			query.setParameter("voided", false);
-			query.setParameter("dateCreated", patient.getDateCreated(), TemporalType.DATE);
+			Query query = sessionFactory.getCurrentSession().createSQLQuery(insert);
+			query.setInteger("patientId", patient.getPatientId());
+			query.setInteger("creator", patient.getCreator().getUserId());
+			query.setBoolean("voided", false);
+			query.setDate("dateCreated", patient.getDateCreated());
 			
 			query.executeUpdate();
 			
@@ -235,24 +220,33 @@ public class HibernatePatientDAO implements PatientDAO {
 		return getPatients(query, false, start, length);
 	}
 	
+	private void setFirstAndMaxResult(Criteria criteria, Integer start, Integer length) {
+		if (start != null) {
+			criteria.setFirstResult(start);
+		}
+		
+		int maximumSearchResults = HibernatePersonDAO.getMaximumSearchResults();
+		if (length != null && length < maximumSearchResults) {
+			criteria.setMaxResults(length);
+		} else {
+			log.debug("Limiting the size of the number of matching patients to {}", maximumSearchResults);
+			criteria.setMaxResults(maximumSearchResults);
+		}
+	}
+	
 	/**
 	 * @see org.openmrs.api.db.PatientDAO#getAllPatients(boolean)
 	 */
 	@SuppressWarnings("unchecked")
-	@Override
+        @Override
 	public List<Patient> getAllPatients(boolean includeVoided) throws DAOException {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<Patient> query = builder.createQuery(Patient.class);
-		Root<Patient> root = query.from(Patient.class);
-
+		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Patient.class);
+		
 		if (!includeVoided) {
-			query.where(builder.isFalse(root.get("voided")));
+			criteria.add(Restrictions.eq("voided", false));
 		}
-
-		query.select(root);
-
-		return session.createQuery(query).getResultList();
+		
+		return criteria.list();
 	}
 	
 	/**
@@ -263,49 +257,46 @@ public class HibernatePatientDAO implements PatientDAO {
 	public void deletePatientIdentifierType(PatientIdentifierType patientIdentifierType) throws DAOException {
 		sessionFactory.getCurrentSession().delete(patientIdentifierType);
 	}
-
+	
 	/**
 	 * @see org.openmrs.api.PatientService#getPatientIdentifiers(java.lang.String, java.util.List, java.util.List, java.util.List, java.lang.Boolean)
 	 */
 	@SuppressWarnings("unchecked")
-	@Override
-	public List<PatientIdentifier> getPatientIdentifiers(String identifier, 
-			List<PatientIdentifierType> patientIdentifierTypes, List<Location> locations, List<Patient> patients,
-			Boolean isPreferred) throws DAOException {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<PatientIdentifier> query = builder.createQuery(PatientIdentifier.class);
-		Root<PatientIdentifier> root = query.from(PatientIdentifier.class);
-		Join<PatientIdentifier, Patient> patientJoin = root.join("patient");
+        @Override
+	public List<PatientIdentifier> getPatientIdentifiers(String identifier,
+	        List<PatientIdentifierType> patientIdentifierTypes, List<Location> locations, List<Patient> patients,
+	        Boolean isPreferred) throws DAOException {
+		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(PatientIdentifier.class);
+		
+		// join with the patient table to prevent patient identifiers from patients
+		// that already voided getting returned
+		criteria.createAlias("patient", "patient");
 
-		List<Predicate> predicates = new ArrayList<>();
-
-		predicates.add(builder.isFalse(patientJoin.get("voided")));
-		predicates.add(builder.isFalse(root.get("voided")));
-
+		criteria.add(Restrictions.eq("patient.voided", false));
+		
+		criteria.add(Restrictions.eq("voided", false));
+		
 		if (identifier != null) {
-			predicates.add(builder.equal(root.get("identifier"), identifier));
+			criteria.add(Restrictions.eq("identifier", identifier));
 		}
-
+		
 		if (!patientIdentifierTypes.isEmpty()) {
-			predicates.add(root.get("identifierType").in(patientIdentifierTypes));
+			criteria.add(Restrictions.in("identifierType", patientIdentifierTypes));
 		}
-
+		
 		if (!locations.isEmpty()) {
-			predicates.add(root.get("location").in(locations));
+			criteria.add(Restrictions.in("location", locations));
 		}
-
+		
 		if (!patients.isEmpty()) {
-			predicates.add(root.get("patient").in(patients));
+			criteria.add(Restrictions.in("patient", patients));
 		}
-
+		
 		if (isPreferred != null) {
-			predicates.add(builder.equal(root.get("preferred"), isPreferred));
+			criteria.add(Restrictions.eq("preferred", isPreferred));
 		}
-
-		query.select(root).where(predicates.toArray(new Predicate[]{}));
-
-		return session.createQuery(query).getResultList();
+		
+		return criteria.list();
 	}
 	
 	/**
@@ -343,29 +334,23 @@ public class HibernatePatientDAO implements PatientDAO {
 	 * @see org.openmrs.api.db.PatientDAO#getAllPatientIdentifierTypes(boolean)
 	 */
 	@SuppressWarnings("unchecked")
-	@Override
+        @Override
 	public List<PatientIdentifierType> getAllPatientIdentifierTypes(boolean includeRetired) throws DAOException {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<PatientIdentifierType> query = builder.createQuery(PatientIdentifierType.class);
-		Root<PatientIdentifierType> root = query.from(PatientIdentifierType.class);
-
-		List<Order> orders = new ArrayList<>();
-
+		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(PatientIdentifierType.class);
+		
 		if (!includeRetired) {
-			query.where(builder.isFalse(root.get("retired")));
+			criteria.add(Restrictions.eq("retired", false));
 		} else {
 			//retired last
-			orders.add(builder.asc(root.get("retired")));
+			criteria.addOrder(Order.asc("retired"));
 		}
-
+		
 		//required first
-		orders.add(builder.desc(root.get("required")));
-		orders.add(builder.asc(root.get("name")));
-		orders.add(builder.asc(root.get("patientIdentifierTypeId")));
-
-		query.orderBy(orders);
-		return session.createQuery(query).getResultList();
+		criteria.addOrder(Order.desc("required"));
+		criteria.addOrder(Order.asc("name"));
+		criteria.addOrder(Order.asc("patientIdentifierTypeId"));
+		
+		return criteria.list();
 	}
 	
 	/**
@@ -385,44 +370,36 @@ public class HibernatePatientDAO implements PatientDAO {
 	 *
 	 */
 	@SuppressWarnings("unchecked")
-	@Override
+        @Override
 	public List<PatientIdentifierType> getPatientIdentifierTypes(String name, String format, Boolean required,
-			Boolean hasCheckDigit) throws DAOException {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<PatientIdentifierType> query = builder.createQuery(PatientIdentifierType.class);
-		Root<PatientIdentifierType> root = query.from(PatientIdentifierType.class);
-
-		List<Predicate> predicates = new ArrayList<>();
-
+	        Boolean hasCheckDigit) throws DAOException {
+		
+		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(PatientIdentifierType.class);
+		
 		if (name != null) {
-			predicates.add(builder.equal(root.get("name"), name));
+			criteria.add(Restrictions.eq("name", name));
 		}
-
+		
 		if (format != null) {
-			predicates.add(builder.equal(root.get("format"), format));
+			criteria.add(Restrictions.eq("format", format));
 		}
-
+		
 		if (required != null) {
-			predicates.add(builder.equal(root.get("required"), required));
+			criteria.add(Restrictions.eq("required", required));
 		}
-
+		
 		if (hasCheckDigit != null) {
-			predicates.add(builder.equal(root.get("checkDigit"), hasCheckDigit));
+			criteria.add(Restrictions.eq("checkDigit", hasCheckDigit));
 		}
-
-		predicates.add(builder.isFalse(root.get("retired")));
-
-		List<Order> orders = new ArrayList<>();
-
+		
+		criteria.add(Restrictions.eq("retired", false));
+		
 		//required first
-		orders.add(builder.desc(root.get("required")));
-		orders.add(builder.asc(root.get("name")));
-		orders.add(builder.asc(root.get("patientIdentifierTypeId")));
-
-		query.where(predicates.toArray(new Predicate[]{}));
-		query.orderBy(orders);
-		return session.createQuery(query).getResultList();
+		criteria.addOrder(Order.desc("required"));
+		criteria.addOrder(Order.asc("name"));
+		criteria.addOrder(Order.asc("patientIdentifierTypeId"));
+		
+		return criteria.list();
 	}
 	
 	/**
@@ -442,11 +419,11 @@ public class HibernatePatientDAO implements PatientDAO {
 			String sqlString = getDuplicatePatientsSQLString(attributes);
 			if(sqlString != null) {
 
-				NativeQuery<Integer> sqlquery = sessionFactory.getCurrentSession().createNativeQuery(sqlString, Integer.class);
+				SQLQuery sqlquery = sessionFactory.getCurrentSession().createSQLQuery(sqlString);
 				patientIds = sqlquery.list();
 				if (!patientIds.isEmpty()) {
-					Query<Patient> query = sessionFactory.getCurrentSession().createQuery(
-							"from Patient p1 where p1.patientId in (:ids)", Patient.class);
+					Query query = sessionFactory.getCurrentSession().createQuery(
+							"from Patient p1 where p1.patientId in (:ids)");
 					query.setParameterList("ids", patientIds);
 					patients = query.list();
 				}
@@ -478,15 +455,7 @@ public class HibernatePatientDAO implements PatientDAO {
 			}
 			if (patientFieldNames.contains(attribute)) {
 
-				SessionFactoryImplementor sfi =
-					sessionFactory.unwrap(SessionFactoryImplementor.class);
-
-				AbstractEntityPersister aep =
-					(AbstractEntityPersister)
-						sfi.getRuntimeMetamodels()
-							.getMappingMetamodel()
-							.getEntityDescriptor(Patient.class);
-
+				AbstractEntityPersister aep = (AbstractEntityPersister) sessionFactory.getClassMetadata(Patient.class);
 				String[] properties = aep.getPropertyColumnNames(attribute);
 				if (properties.length >= 1) {
 					attribute = properties[0];
@@ -501,16 +470,7 @@ public class HibernatePatientDAO implements PatientDAO {
 					innerSelect.append("inner join person person1 on p1.patient_id = person1.person_id ");
 				}
 
-				SessionFactoryImplementor sfi =
-					sessionFactory.unwrap(SessionFactoryImplementor.class);
-
-				AbstractEntityPersister aep =
-					(AbstractEntityPersister)
-						sfi.getRuntimeMetamodels()
-							.getMappingMetamodel()
-							.getEntityDescriptor(Person.class);
-				
-				
+				AbstractEntityPersister aep = (AbstractEntityPersister) sessionFactory.getClassMetadata(Person.class);
 				if (aep != null) {
 					String[] properties = aep.getPropertyColumnNames(attribute);
 					if (properties != null && properties.length >= 1) {
@@ -527,15 +487,8 @@ public class HibernatePatientDAO implements PatientDAO {
 				}
 
 				//Since we are firing a native query get the actual table column name from the field name of the entity
-				SessionFactoryImplementor sfi =
-					sessionFactory.unwrap(SessionFactoryImplementor.class);
-
-				AbstractEntityPersister aep =
-					(AbstractEntityPersister)
-						sfi.getRuntimeMetamodels()
-							.getMappingMetamodel()
-							.getEntityDescriptor(PersonName.class);
-				
+				AbstractEntityPersister aep = (AbstractEntityPersister) sessionFactory
+						.getClassMetadata(PersonName.class);
 				if (aep != null) {
 					String[] properties = aep.getPropertyColumnNames(attribute);
 
@@ -552,15 +505,8 @@ public class HibernatePatientDAO implements PatientDAO {
 					innerSelect.append("inner join patient_identifier pi1 on p1.patient_id = pi1.patient_id ");
 				}
 
-				SessionFactoryImplementor sfi =
-					sessionFactory.unwrap(SessionFactoryImplementor.class);
-
-				AbstractEntityPersister aep =
-					(AbstractEntityPersister)
-						sfi.getRuntimeMetamodels()
-							.getMappingMetamodel()
-							.getEntityDescriptor(PatientIdentifier.class);
-				
+				AbstractEntityPersister aep = (AbstractEntityPersister) sessionFactory
+						.getClassMetadata(PatientIdentifier.class);
 				if (aep != null) {
 
 					String[] properties = aep.getPropertyColumnNames(attribute);
@@ -627,19 +573,16 @@ public class HibernatePatientDAO implements PatientDAO {
 	public Patient getPatientByUuid(String uuid) {
 		Patient p;
 		
-		p = sessionFactory.getCurrentSession()
-			.createQuery("from Patient p where p.uuid = :uuid", Patient.class)
-			.setParameter("uuid", uuid).uniqueResult();
+		p = (Patient) sessionFactory.getCurrentSession().createQuery("from Patient p where p.uuid = :uuid").setString(
+		    "uuid", uuid).uniqueResult();
 		
 		return p;
 	}
 	
         @Override
 	public PatientIdentifier getPatientIdentifierByUuid(String uuid) {
-		return sessionFactory.getCurrentSession().createQuery(
-		    "from PatientIdentifier p where p.uuid = :uuid", PatientIdentifier.class)
-			.setParameter("uuid", uuid)
-			.uniqueResult();
+		return (PatientIdentifier) sessionFactory.getCurrentSession().createQuery(
+		    "from PatientIdentifier p where p.uuid = :uuid").setString("uuid", uuid).uniqueResult();
 	}
 	
 	/**
@@ -647,10 +590,8 @@ public class HibernatePatientDAO implements PatientDAO {
 	 */
         @Override
 	public PatientIdentifierType getPatientIdentifierTypeByUuid(String uuid) {
-		return sessionFactory.getCurrentSession().createQuery(
-		    "from PatientIdentifierType pit where pit.uuid = :uuid", PatientIdentifierType.class)
-			.setParameter("uuid", uuid)
-			.uniqueResult();
+		return (PatientIdentifierType) sessionFactory.getCurrentSession().createQuery(
+		    "from PatientIdentifierType pit where pit.uuid = :uuid").setString("uuid", uuid).uniqueResult();
 	}
 	
 	/**
@@ -668,23 +609,23 @@ public class HibernatePatientDAO implements PatientDAO {
 		
 		// switched this to an hql query so the hibernate cache can be considered as well as the database
 		String hql = "select count(*) from PatientIdentifier pi, Patient p where pi.patient.patientId = p.patientId "
-		        + "and p.voided = false and pi.voided = false and pi.identifier = :identifier and pi.identifierType.patientIdentifierTypeId = :idType";
+		        + "and p.voided = false and pi.voided = false and pi.identifier = :identifier and pi.identifierType = :idType";
 		
 		if (checkPatient) {
 			hql += " and p.patientId != :ptId";
 		}
 		if (checkLocation) {
-			hql += " and pi.location.locationId = :locationId";
+			hql += " and pi.location = :locationId";
 		}
 		
-		Query<Long> query = sessionFactory.getCurrentSession().createQuery(hql, Long.class);
-		query.setParameter("identifier", patientIdentifier.getIdentifier());
-		query.setParameter("idType", patientIdentifier.getIdentifierType().getPatientIdentifierTypeId());
+		Query query = sessionFactory.getCurrentSession().createQuery(hql);
+		query.setString("identifier", patientIdentifier.getIdentifier());
+		query.setInteger("idType", patientIdentifier.getIdentifierType().getPatientIdentifierTypeId());
 		if (checkPatient) {
-			query.setParameter("ptId", patientIdentifier.getPatient().getPatientId());
+			query.setInteger("ptId", patientIdentifier.getPatient().getPatientId());
 		}
 		if (checkLocation) {
-			query.setParameter("locationId", patientIdentifier.getLocation().getLocationId());
+			query.setInteger("locationId", patientIdentifier.getLocation().getLocationId());
 		}
 		return !"0".equals(query.uniqueResult().toString());
 	}
@@ -746,28 +687,24 @@ public class HibernatePatientDAO implements PatientDAO {
 		if (StringUtils.isBlank(query)) {
 			return 0L;
 		}
+		String tmpQuery = LuceneQuery.escapeQuery(query);
 
-		PersonQuery personQuery = new PersonQuery();
+		LuceneQuery<PatientIdentifier> identifierQuery = getPatientIdentifierLuceneQuery(tmpQuery, includeVoided, false);
 
-		return SearchQueryUnique.searchCount(searchSessionFactory,
-			SearchQueryUnique.newQuery(PatientIdentifier.class, f ->
-					newPatientIdentifierSearchPredicate(f, query, includeVoided, false),
-				 "patient.personId", PatientIdentifier::getPatient).join(
-					 SearchQueryUnique.newQuery(PersonName.class, f ->
-						personQuery.getPatientNameQuery(f, query, includeVoided),
-					 "person.personId", pN -> getPatient(pN.getPerson().getId())).join(
-						 SearchQueryUnique.newQuery(PersonAttribute.class,
-						f -> personQuery.getPatientAttributeQuery(f, query, includeVoided),
-						 "person.personId", pA -> getPatient(pA.getPerson().getId())
-					))));
+		PersonLuceneQuery personLuceneQuery = new PersonLuceneQuery(sessionFactory);
+
+		LuceneQuery<PersonName> nameQuery = personLuceneQuery.getPatientNameQuery(tmpQuery, includeVoided, identifierQuery);
+		LuceneQuery<PersonAttribute> attributeQuery = personLuceneQuery.getPatientAttributeQuery(tmpQuery, includeVoided, nameQuery);
+
+		return identifierQuery.resultSize() + nameQuery.resultSize() + attributeQuery.resultSize();
 	}
 
     private List<Patient> findPatients(String query, boolean includeVoided) {
 		return findPatients(query, includeVoided, null, null);
 	}
 	
-	private List<Patient> findPatients(String query, List<PatientIdentifierType> identifierTypes, boolean matchExactly, 
-									   Integer start, Integer length) {
+	private List<Patient> findPatients(String query, List<PatientIdentifierType> identifierTypes, boolean matchExactly, Integer start, Integer length) {
+		String tmpQuery = query;
 		Integer tmpStart = start;
 		
 		if (tmpStart == null) {
@@ -778,30 +715,38 @@ public class HibernatePatientDAO implements PatientDAO {
 		if (tmpLength == null || tmpLength > maxLength) {
 			tmpLength = maxLength;
 		}
+		tmpQuery = LuceneQuery.escapeQuery(tmpQuery);
+		
 		List<Patient> patients = new LinkedList<>();
 		
 		String minChars = Context.getAdministrationService().getGlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_MIN_SEARCH_CHARACTERS);
 		
-		if (!StringUtils.isNumeric(minChars)) {
+		if (minChars == null || !StringUtils.isNumeric(minChars)) {
 			minChars = "" + OpenmrsConstants.GLOBAL_PROPERTY_DEFAULT_MIN_SEARCH_CHARACTERS;
 		}
-		if (query.length() < Integer.parseInt(minChars)) {
+		if (tmpQuery.length() < Integer.valueOf(minChars)) {
 			return patients;
 		}
+		LuceneQuery<PatientIdentifier> identifierQuery = getPatientIdentifierLuceneQuery(tmpQuery, identifierTypes, matchExactly);
 		
-		return SearchQueryUnique.search(searchSessionFactory, SearchQueryUnique.newQuery(PatientIdentifier.class, 
-			f -> f.bool().with(b -> {
-			b.must(getPatientIdentifierSearchPredicate(f, query, matchExactly));
-			List<Integer> identifierTypeIds = new ArrayList<Integer>();
-			for(PatientIdentifierType identifierType : identifierTypes) {
-				identifierTypeIds.add(identifierType.getId());
-			}
-			b.filter(f.terms().field("identifierType.patientIdentifierTypeId").matchingAny(identifierTypeIds));
-			b.filter(f.match().field("patient.isPatient").matching(true));
-		}).toPredicate(), "patient.personId", PatientIdentifier::getPatient), tmpStart, tmpLength);
+		long identifiersSize = identifierQuery.resultSize();
+		if (identifiersSize > tmpStart) {
+			ListPart<Object[]> patientIdentifiers = identifierQuery.listPartProjection(tmpStart, tmpLength, "patient.personId");
+			patientIdentifiers.getList().forEach(patientIdentifier -> patients.add(getPatient((Integer) patientIdentifier[0])));
+			
+			tmpLength -= patientIdentifiers.getList().size();
+			tmpStart = 0;
+		} else {
+			tmpStart -= (int) identifiersSize;
+		}
+		
+		if (tmpLength == 0) {
+			return patients;
+		}
+		return patients;
 	}
 	
-	public List<Patient> findPatients(String query, boolean includeVoided, Integer start, Integer length) {
+	public List<Patient> findPatients(String query, boolean includeVoided, Integer start, Integer length){
 		Integer tmpStart = start;
 		if (tmpStart == null) {
 			tmpStart = 0;
@@ -811,70 +756,110 @@ public class HibernatePatientDAO implements PatientDAO {
 		if (tmpLength == null || tmpLength > maxLength) {
 			tmpLength = maxLength;
 		}
+		query = LuceneQuery.escapeQuery(query);
 
 		List<Patient> patients = new LinkedList<>();
 
-		String minChars = Context.getAdministrationService().getGlobalProperty(
-			OpenmrsConstants.GLOBAL_PROPERTY_MIN_SEARCH_CHARACTERS);
+		String minChars = Context.getAdministrationService().getGlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_MIN_SEARCH_CHARACTERS);
 
-		if (!StringUtils.isNumeric(minChars)) {
+		if (minChars == null || !StringUtils.isNumeric(minChars)) {
 			minChars = "" + OpenmrsConstants.GLOBAL_PROPERTY_DEFAULT_MIN_SEARCH_CHARACTERS;
 		}
-		if (query.length() < Integer.parseInt(minChars)) {
+		if (query.length() < Integer.valueOf(minChars)) {
 			return patients;
 		}
 
-		PersonQuery personQuery = new PersonQuery();
+		LuceneQuery<PatientIdentifier> identifierQuery = getPatientIdentifierLuceneQuery(query, includeVoided, false);
 
-		patients = SearchQueryUnique.search(searchSessionFactory,
-			SearchQueryUnique.newQuery(PatientIdentifier.class, f -> 
-					newPatientIdentifierSearchPredicate(f, query, includeVoided, false), 
-				 "patient.personId", PatientIdentifier::getPatient).join(
-					 SearchQueryUnique.newQuery(PersonName.class, f -> 
-					personQuery.getPatientNameQuery(f, query, includeVoided),
-					 "person.personId", pN -> getPatient(pN.getPerson().getId())).join(
-						 SearchQueryUnique.newQuery(PersonAttribute.class,
-						f -> personQuery.getPatientAttributeQuery(f, query, includeVoided), 
-						"person.personId", pA -> getPatient(pA.getPerson().getId())
-						))), start, length);
+		long identifiersSize = identifierQuery.resultSize();
+		if (identifiersSize > tmpStart) {
+			ListPart<Object[]> patientIdentifiers = identifierQuery.listPartProjection(tmpStart, tmpLength, "patient.personId");
+			patientIdentifiers.getList().forEach(patientIdentifier -> patients.add(getPatient((Integer) patientIdentifier[0])));
+
+			tmpLength -= patientIdentifiers.getList().size();
+			tmpStart = 0;
+		} else {
+			tmpStart -= (int) identifiersSize;
+		}
+
+		if (tmpLength == 0) {
+			return patients;
+		}
+
+		PersonLuceneQuery personLuceneQuery = new PersonLuceneQuery(sessionFactory);
+
+		LuceneQuery<PersonName> nameQuery = personLuceneQuery.getPatientNameQuery(query, includeVoided, identifierQuery);
+		long namesSize = nameQuery.resultSize();
+		if (namesSize > tmpStart) {
+			ListPart<Object[]> personNames = nameQuery.listPartProjection(tmpStart, tmpLength, "person.personId");
+			personNames.getList().forEach(personName -> patients.add(getPatient((Integer) personName[0])));
+
+			tmpLength -= personNames.getList().size();
+			tmpStart = 0;
+		} else {
+			tmpStart -= (int) namesSize;
+		}
+
+		if (tmpLength == 0) {
+			return patients;
+		}
+
+		LuceneQuery<PersonAttribute> attributeQuery = personLuceneQuery.getPatientAttributeQuery(query, includeVoided, nameQuery);
+		long attributesSize = attributeQuery.resultSize();
+		if (attributesSize > tmpStart) {
+			ListPart<Object[]> personAttributes = attributeQuery.listPartProjection(tmpStart, tmpLength, "person.personId");
+			personAttributes.getList().forEach(personAttribute -> patients.add(getPatient((Integer) personAttribute[0])));
+		}
 
 		return patients;
 	}
-	
-	private SearchPredicate getPatientIdentifierSearchPredicate(SearchPredicateFactory f, String paramQuery, boolean matchExactly) {
-		List<String> tokens = tokenizeIdentifierQuery(removeIdentifierPadding(paramQuery));
-		final String query = StringUtils.join(tokens, " | ");
-		//TODO: hibernate search identifierType?
-		//fields.add("identifierType");
-		return f.bool().with(b -> {
-			b.minimumShouldMatchNumber(1);
-			b.should(f.simpleQueryString().field("identifierPhrase").matching(query).boost(8f));
-			String matchMode = Context.getAdministrationService()
-				.getGlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_PATIENT_IDENTIFIER_SEARCH_MATCH_MODE);
-			if (matchExactly) {
-				b.should(f.simpleQueryString().field("identifierExact").matching(query).boost(4f));
-			}
-			else if (OpenmrsConstants.GLOBAL_PROPERTY_PATIENT_SEARCH_MATCH_START.equals(matchMode)) {
-				b.should(f.simpleQueryString().field("identifierStart").matching(query).boost(2f));
-			}
-			else  {
-				b.should(f.simpleQueryString().field("identifierAnywhere").matching(query));
-			}
-		}).toPredicate();
-	
+	private LuceneQuery<PatientIdentifier> getPatientIdentifierLuceneQuery(String query, List<PatientIdentifierType> identifierTypes, boolean matchExactly) {
+		LuceneQuery<PatientIdentifier> patientIdentifierLuceneQuery = getPatientIdentifierLuceneQuery(query, matchExactly);
+		List<Integer> identifierTypeIds = new ArrayList<Integer>();
+		for(PatientIdentifierType identifierType : identifierTypes) {
+			identifierTypeIds.add(identifierType.getId());
+		}
+		patientIdentifierLuceneQuery.include("identifierType.patientIdentifierTypeId", identifierTypeIds);
+		patientIdentifierLuceneQuery.include("patient.isPatient", true);
+		patientIdentifierLuceneQuery.skipSame("patient.personId");
+		
+		return patientIdentifierLuceneQuery;
 	}
+	
+	private LuceneQuery<PatientIdentifier> getPatientIdentifierLuceneQuery(String paramQuery, boolean matchExactly) {
+		String query = removeIdentifierPadding(paramQuery);
+		List<String> tokens = tokenizeIdentifierQuery(query);
+		query = StringUtils.join(tokens, " OR ");
+		List<String> fields = new ArrayList<>();
+		fields.add("identifierPhrase");
+		fields.add("identifierType");
+		String matchMode = Context.getAdministrationService()
+			.getGlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_PATIENT_IDENTIFIER_SEARCH_MATCH_MODE);
+		if (matchExactly) {
+			fields.add("identifierExact");
+		}
+		else if (OpenmrsConstants.GLOBAL_PROPERTY_PATIENT_SEARCH_MATCH_START.equals(matchMode)) {
+			fields.add("identifierStart");
+		} 
+		else  {
+			fields.add("identifierAnywhere");
+		}
+		return LuceneQuery.newQuery(PatientIdentifier.class, sessionFactory.getCurrentSession(), query, fields);
+	
+	}		
+		
+	private LuceneQuery<PatientIdentifier> getPatientIdentifierLuceneQuery(String query, boolean includeVoided, boolean matchExactly) {
+	    LuceneQuery<PatientIdentifier> luceneQuery = getPatientIdentifierLuceneQuery(query, matchExactly);
+		if(!includeVoided){
+        	luceneQuery.include("voided", false);
+			luceneQuery.include("patient.voided", false);
+        }
 
-	private SearchPredicate newPatientIdentifierSearchPredicate(SearchPredicateFactory predicateFactory, String query, boolean includeVoided, boolean matchExactly) {
-		return predicateFactory.bool().with(b -> {
-			b.must(getPatientIdentifierSearchPredicate(predicateFactory, query, matchExactly));
+        luceneQuery.include("patient.isPatient", true);
+		luceneQuery.skipSame("patient.personId");
 
-			if (!includeVoided) {
-				b.filter(predicateFactory.match().field("voided").matching(false));
-				b.filter(predicateFactory.match().field("patient.voided").matching(false));
-			}
-			b.filter(predicateFactory.match().field("patient.isPatient").matching(true));
-		}).toPredicate();
-	}
+        return luceneQuery;
+    }
 
 	private String removeIdentifierPadding(String query) {
 		String regex = Context.getAdministrationService().getGlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_PATIENT_IDENTIFIER_REGEX, "");
@@ -942,22 +927,15 @@ public class HibernatePatientDAO implements PatientDAO {
 	}
 
     /**
-	 * @see org.openmrs.api.db.PatientDAO#getAllergies(org.openmrs.Patient)
+	 * @see org.openmrs..api.db.PatientDAO#getAllergies(org.openmrs.Patient)
 	 */
 	//@Override
         @Override
 	public List<Allergy> getAllergies(Patient patient) {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<Allergy> query = builder.createQuery(Allergy.class);
-		Root<Allergy> root = query.from(Allergy.class);
-
-		query.where(
-			builder.equal(root.get("patient"), patient),
-			builder.isFalse(root.get("voided"))
-		);
-
-		return session.createQuery(query).getResultList();
+		Criteria criteria = sessionFactory.getCurrentSession().createCriteria(Allergy.class);
+		criteria.add(Restrictions.eq("patient", patient));
+		criteria.add(Restrictions.eq("voided", false));
+		return criteria.list();
 	}
 	
 	/**
@@ -967,10 +945,8 @@ public class HibernatePatientDAO implements PatientDAO {
         @Override
 	public String getAllergyStatus(Patient patient) {
 
-		return sessionFactory.getCurrentSession().createNativeQuery(
-			    "select allergy_status from patient where patient_id = :patientId", String.class)
-			.setParameter("patientId", patient.getPatientId())
-			.uniqueResult();
+		return (String) sessionFactory.getCurrentSession().createSQLQuery(
+			    "select allergy_status from patient where patient_id = :patientId").setInteger("patientId", patient.getPatientId()).uniqueResult();
 	}
 	
 	/**
@@ -980,10 +956,10 @@ public class HibernatePatientDAO implements PatientDAO {
 	@Override
 	public Allergies saveAllergies(Patient patient, Allergies allergies) {
 
-		sessionFactory.getCurrentSession().createNativeMutationQuery(
+		sessionFactory.getCurrentSession().createSQLQuery(
 			    "update patient set allergy_status = :allergyStatus where patient_id = :patientId")
-			    .setParameter("patientId", patient.getPatientId())
-			    .setParameter("allergyStatus", allergies.getAllergyStatus())
+			    .setInteger("patientId", patient.getPatientId())
+			    .setString("allergyStatus", allergies.getAllergyStatus())
 			    .executeUpdate();
 		
 		for (Allergy allergy : allergies) {
@@ -998,10 +974,8 @@ public class HibernatePatientDAO implements PatientDAO {
 	 */
         @Override
 	public Allergy getAllergy(Integer allergyId) {
-		return sessionFactory.getCurrentSession()
-			.createNativeQuery("from Allergy a where a.allergyId = :allergyId", Allergy.class)
-			.setParameter("allergyId", allergyId)
-			.uniqueResult();
+		return (Allergy) sessionFactory.getCurrentSession().createQuery("from Allergy a where a.allergyId = :allergyId")
+				.setInteger("allergyId", allergyId).uniqueResult();
 	}
 	
 	/**
@@ -1009,10 +983,8 @@ public class HibernatePatientDAO implements PatientDAO {
 	 */
         @Override
 	public Allergy getAllergyByUuid(String uuid) {
-		return sessionFactory.getCurrentSession()
-			.createQuery("from Allergy a where a.uuid = :uuid", Allergy.class)
-			.setParameter("uuid", uuid)
-			.uniqueResult();
+		return (Allergy) sessionFactory.getCurrentSession().createQuery("from Allergy a where a.uuid = :uuid")
+				.setString("uuid", uuid).uniqueResult();
 	}
 
 	/**
@@ -1029,13 +1001,9 @@ public class HibernatePatientDAO implements PatientDAO {
      * @see org.openmrs.api.db.PatientDAO#getPatientIdentifierByProgram(org.openmrs.PatientProgram)
      */
     public List<PatientIdentifier> getPatientIdentifierByProgram(PatientProgram patientProgram) {
-		Session session = sessionFactory.getCurrentSession();
-		CriteriaBuilder builder = session.getCriteriaBuilder();
-		CriteriaQuery<PatientIdentifier> query = builder.createQuery(PatientIdentifier.class);
-		Root<PatientIdentifier> root = query.from(PatientIdentifier.class);
 
-		query.where(builder.equal(root.get("patientProgram"), patientProgram));
-		
-        return session.createQuery(query).getResultList();
+        Criteria criteria = sessionFactory.getCurrentSession().createCriteria(PatientIdentifier.class);
+        criteria.add(Restrictions.eq("patientProgram", patientProgram));
+        return criteria.list();
     }
 }

@@ -9,10 +9,6 @@
  */
 package org.openmrs;
 
-import jakarta.persistence.Cacheable;
-
-import org.hibernate.annotations.Cache;
-import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.envers.Audited;
 
 /**
@@ -21,8 +17,6 @@ import org.hibernate.envers.Audited;
  * @version 1.0
  */
 @Audited
-@Cacheable
-@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class Privilege extends BaseChangeableOpenmrsMetadata {
 	
 	public static final long serialVersionUID = 312L;

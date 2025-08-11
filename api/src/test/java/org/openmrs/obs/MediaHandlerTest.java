@@ -37,8 +37,15 @@ public class MediaHandlerTest extends BaseContextSensitiveTest {
 	@Autowired
 	private AdministrationService adminService;
 	
-	@Autowired
+	@TempDir
+	public Path complexObsTestFolder;
+	
 	MediaHandler handler;
+	
+	@BeforeEach
+	public void setUp() {
+		handler = new MediaHandler();
+	}
 	
 	@Test
     public void shouldReturnSupportedViews() {
@@ -68,7 +75,7 @@ public class MediaHandlerTest extends BaseContextSensitiveTest {
 	public void saveObs_shouldRetrieveCorrectMimetype() throws IOException {
 		
 		adminService.saveGlobalProperty(new GlobalProperty(OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR,
-		        "obs"));
+		        complexObsTestFolder.toAbsolutePath().toString()));
 		
 		File sourceFile = Paths.get("src", "test", "resources", "ComplexObsTestAudio.mp3").toFile();
 		

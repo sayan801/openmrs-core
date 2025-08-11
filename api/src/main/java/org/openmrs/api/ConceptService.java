@@ -2037,7 +2037,7 @@ public interface ConceptService extends OpenmrsService {
 	 * @since 2.7.0
 	 */
 	@Authorized(PrivilegeConstants.GET_CONCEPTS)
-	ConceptReferenceRange getConceptReferenceRange(Person person, Concept concept);
+	public ConceptReferenceRange getConceptReferenceRange(Person person, Concept concept);
 	
 	/**
 	 * Completely purge a <code>ConceptReferenceRange</code> from the database.

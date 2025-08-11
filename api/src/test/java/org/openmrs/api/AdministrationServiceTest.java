@@ -1106,7 +1106,7 @@ public class AdministrationServiceTest extends BaseContextSensitiveTest {
 
 	private Cache.ValueWrapper getCacheForCurrentUser(){
 		Object[] params = { Context.getLocale(), Context.getAuthenticatedUser() };
-		Object key = SimpleKeyGenerator.generateKey(params);
+		Object key = (new SimpleKeyGenerator()).generate(null, null, params);
 		return cacheManager.getCache("userSearchLocales").get(key);
 	}
 

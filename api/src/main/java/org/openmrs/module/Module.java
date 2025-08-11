@@ -712,6 +712,17 @@ public final class Module {
 		this.mandatory = mandatory;
 	}
 	
+	/**
+	 * This is a convenience method to know whether this module is core to OpenMRS. A module is
+	 * 'core' when this module is essentially part of the core code and must exist at all times
+	 *
+	 * @return true if this is an OpenMRS core module
+	 * @see ModuleConstants#CORE_MODULES
+	 */
+	public boolean isCoreModule() {
+		return !ModuleUtil.ignoreCoreModules() && ModuleConstants.CORE_MODULES.containsKey(moduleId);
+	}
+	
 	public boolean isStarted() {
 		return ModuleFactory.isModuleStarted(this);
 	}
@@ -800,5 +811,8 @@ public final class Module {
 	public void setConditionalResources(List<ModuleConditionalResource> conditionalResources) {
 		this.conditionalResources = conditionalResources;
 	}
-
+	
+	public boolean isCore() {
+		return ModuleConstants.CORE_MODULES.containsKey(getModuleId());
+	}
 }

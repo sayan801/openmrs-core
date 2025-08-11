@@ -235,11 +235,6 @@ public class OrderServiceImpl extends BaseOpenmrsService implements OrderService
 			if (drugOrder.getDrug() != null) {
 				concept = drugOrder.getDrug().getConcept();
 				drugOrder.setConcept(concept);
-			} else {
-				if (drugOrder.isNonCodedDrug()) {
-					concept = getNonCodedDrugConcept();
-					drugOrder.setConcept(concept);
-				}
 			}
 		}
 		if (concept == null) {

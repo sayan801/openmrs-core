@@ -35,9 +35,15 @@ public class BinaryStreamHandlerTest  extends BaseContextSensitiveTest {
 	@Autowired
 	private AdministrationService adminService;
 
-	@Autowired
+	@TempDir
+	public Path complexObsTestFolder;
+
 	BinaryStreamHandler handler;
 
+	@BeforeEach
+	public void setUp() {
+		handler = new BinaryStreamHandler();
+	}
     @Test
     public void shouldReturnSupportedViews() {
         String[] actualViews = handler.getSupportedViews();
@@ -69,7 +75,7 @@ public class BinaryStreamHandlerTest  extends BaseContextSensitiveTest {
 		
 		adminService.saveGlobalProperty(new GlobalProperty(
 			OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR,
-			"obs"
+			complexObsTestFolder.toAbsolutePath().toString()
 		));
 		
 		String mimetype = "application/octet-stream";
@@ -95,12 +101,8 @@ public class BinaryStreamHandlerTest  extends BaseContextSensitiveTest {
 			assertEquals(complexObs1.getComplexData().getMimeType(), mimetype);
 			assertEquals(complexObs2.getComplexData().getMimeType(), mimetype);
 		} finally {
-			if (complexObs1 != null) {
-				((InputStream) complexObs1.getComplexData().getData()).close();
-			}
-			if (complexObs2 != null) {
-				((InputStream) complexObs2.getComplexData().getData()).close();
-			}
+			((InputStream) complexObs1.getComplexData().getData()).close();
+			((InputStream) complexObs2.getComplexData().getData()).close();
 		}
 	}
 }

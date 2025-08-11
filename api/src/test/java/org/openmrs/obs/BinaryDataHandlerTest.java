@@ -33,8 +33,15 @@ public class BinaryDataHandlerTest extends BaseContextSensitiveTest {
 	@Autowired
 	private AdministrationService adminService;
 
-	@Autowired
+	@TempDir
+	public Path complexObsTestFolder;
+
 	BinaryDataHandler handler;
+
+	@BeforeEach
+	public void setUp() {
+		handler = new BinaryDataHandler();
+	}
 
 	@Test
     public void shouldReturnSupportedViews() {
@@ -79,7 +86,7 @@ public class BinaryDataHandlerTest extends BaseContextSensitiveTest {
 
 		adminService.saveGlobalProperty(new GlobalProperty(
 			OpenmrsConstants.GLOBAL_PROPERTY_COMPLEX_OBS_DIR,
-			"obs"
+			complexObsTestFolder.toAbsolutePath().toString()
 		));
 
 		// Execute save

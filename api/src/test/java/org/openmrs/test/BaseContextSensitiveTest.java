@@ -9,13 +9,6 @@
  */
 package org.openmrs.test;
 
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JPasswordField;
-import javax.swing.JTextField;
-import javax.swing.UIManager;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GridBagConstraints;
@@ -41,6 +34,14 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
+
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JTextField;
+import javax.swing.UIManager;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.ArrayUtils;
@@ -83,6 +84,7 @@ import org.openmrs.api.context.ContextAuthenticationException;
 import org.openmrs.api.context.ContextMockHelper;
 import org.openmrs.api.context.Credentials;
 import org.openmrs.api.context.UsernamePasswordCredentials;
+import org.openmrs.module.ModuleConstants;
 import org.openmrs.util.DatabaseUtil;
 import org.openmrs.util.OpenmrsClassLoader;
 import org.openmrs.util.OpenmrsConstants;
@@ -109,16 +111,10 @@ import org.xml.sax.InputSource;
  * To migrate your tests follow <a href="https://wiki.openmrs.org/display/docs/How+to+migrate+to+JUnit+5">How to migrate to JUnit 5</a>.
  * The JUnit 5 version of the class is {@link org.openmrs.test.jupiter.BaseContextSensitiveTest}.<p>
  */
-@ContextConfiguration(locations = { "classpath:applicationContext-service.xml",
+@ContextConfiguration(locations = { "classpath:applicationContext-service.xml", "classpath*:openmrs-servlet.xml",
         "classpath*:moduleApplicationContext.xml", "classpath*:TestingApplicationContext.xml" })
-@TestExecutionListeners(
-	listeners = {
-		TransactionalTestExecutionListener.class,
-		SkipBaseSetupAnnotationExecutionListener.class,
-		StartModuleExecutionListener.class
-	},
-	mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS
-)
+@TestExecutionListeners( { TransactionalTestExecutionListener.class, SkipBaseSetupAnnotationExecutionListener.class,
+        StartModuleExecutionListener.class })
 @Transactional
 @Rollback
 @Deprecated
@@ -165,7 +161,7 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	/**
 	 * Allows to determine if the DB is initialized with standard data
 	 */
-	private static volatile boolean isBaseSetup;
+	private static boolean isBaseSetup;
 	
 	/**
 	 * Stores a user authenticated for running tests which allows to discover a situation when some
@@ -180,6 +176,8 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	 */
 	@InjectMocks
 	protected ContextMockHelper contextMockHelper;
+	
+	private static volatile BaseContextSensitiveTest instance;
 	
 	/**
 	 * Basic constructor for the super class to all openmrs api unit tests. This constructor sets up
@@ -204,6 +202,8 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 		Context.setRuntimeProperties(props);
 		
 		loadCount++;
+		
+		instance = this;
 	}
 	
 	/**
@@ -321,7 +321,7 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 		// properties
 		if (useInMemoryDatabase()) {
 			runtimeProperties.setProperty(Environment.DIALECT, H2Dialect.class.getName());
-			String url = "jdbc:h2:mem:openmrs;DB_CLOSE_DELAY=30;LOCK_TIMEOUT=10000;MODE=LEGACY;NON_KEYWORDS=VALUE";
+			String url = "jdbc:h2:mem:openmrs;DB_CLOSE_DELAY=30;LOCK_TIMEOUT=10000";
 			runtimeProperties.setProperty(Environment.URL, url);
 			runtimeProperties.setProperty(Environment.DRIVER, "org.h2.Driver");
 			runtimeProperties.setProperty(Environment.USER, "sa");
@@ -357,6 +357,9 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 			//after that, just update, if there are any changes. This is for performance reasons.
 			runtimeProperties.setProperty(Environment.HBM2DDL_AUTO, "update");
 		}
+		
+		// we don't want to try to load core modules in tests
+		runtimeProperties.setProperty(ModuleConstants.IGNORE_CORE_MODULES_PROPERTY, "true");
 		
 		try {
 			File tempappdir = File.createTempFile("appdir-for-unit-tests-", "");
@@ -840,7 +843,7 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	}
 	
 	protected IDatabaseConnection setupDatabaseConnection(Connection connection) throws DatabaseUnitException {
-		IDatabaseConnection dbUnitConn = new DatabaseConnection(connection, getSchemaPattern());
+		IDatabaseConnection dbUnitConn = new DatabaseConnection(connection);
 		DatabaseConfig config = dbUnitConn.getConfig();
 		
 		if (useInMemoryDatabase()) {
@@ -853,15 +856,6 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 		
 		return dbUnitConn;
 	}
-
-	protected String getSchemaPattern() {
-		if (useInMemoryDatabase()) {
-			return "PUBLIC";
-		}
-		else {
-			return "public";
-		}
-	}
 	
 	/**
 	 * This is a convenience method to clear out all rows in all tables in the current connection.
@@ -870,10 +864,9 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	 * 
 	 * @throws Exception
 	 */
-	public synchronized void deleteAllData() {
+	public void deleteAllData() {
 		try {
 			Context.clearSession();
-			Context.clearEntireCache();
 			
 			Connection connection = getConnection();
 			
@@ -897,21 +890,22 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 			connection.commit();
 			
 			updateSearchIndex();
+			
+			isBaseSetup = false;
 		}
 		catch (SQLException | DatabaseUnitException e) {
 			throw new DatabaseUnitRuntimeException(e);
-		} finally {
-			isBaseSetup = false;
 		}
 	}
 	
 	/**
-	 * Method to clear the hibernate cache only.
+	 * Method to clear the hibernate cache
 	 */
+	@Before
 	public void clearHibernateCache() {
 		SessionFactory sf = (SessionFactory) applicationContext.getBean("sessionFactory");
-		sf.getCache().evictCollectionData();
-		sf.getCache().evictEntityData();
+		sf.getCache().evictCollectionRegions();
+		sf.getCache().evictEntityRegions();
 	}
 	
 	/**
@@ -991,7 +985,6 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	public void clearSessionAfterEachTest() {
 		// clear the session to make sure nothing is cached, etc
 		Context.clearSession();
-		Context.clearEntireCache();
 		
 		// needed because the authenticatedUser is the only object that sticks
 		// around after tests and the clearSession call
@@ -1007,7 +1000,19 @@ public abstract class BaseContextSensitiveTest extends AbstractJUnit4SpringConte
 	 * @throws Exception
 	 */
 	@AfterClass
-	public static synchronized void closeSessionAfterEachClass() throws Exception {
+	public static void closeSessionAfterEachClass() throws Exception {
+		//Some tests add data via executeDataset()
+		//We need to delete it in order not to interfere with others
+		if (instance != null) {
+			try {
+				instance.deleteAllData();
+			}
+			catch (Exception ex) {
+				//No need to worry about this
+			}
+			instance = null;
+		}
+		
 		// clean up the session so we don't leak memory
 		if (Context.isSessionOpen()) {
 			Context.closeSession();

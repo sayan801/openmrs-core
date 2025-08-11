@@ -1,5 +1,0 @@
-caches:
-    userSearchLocales:
-        configuration: "entity"
-    conceptIdsByMapping:
-        configuration: "entity"

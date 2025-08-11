@@ -876,7 +876,7 @@ public class AdministrationServiceImpl extends BaseOpenmrsService implements Adm
 	 */
 	@Override
 	@Transactional(readOnly = true)
-	public long getMaximumPropertyLength(Class<? extends OpenmrsObject> aClass, String fieldName) {
+	public int getMaximumPropertyLength(Class<? extends OpenmrsObject> aClass, String fieldName) {
 		return dao.getMaximumPropertyLength(aClass, fieldName);
 	}
 	

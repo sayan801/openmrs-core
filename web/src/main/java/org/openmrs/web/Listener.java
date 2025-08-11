@@ -11,10 +11,12 @@ package org.openmrs.web;
 
 import org.apache.logging.log4j.LogManager;
 import org.openmrs.api.context.Context;
+import org.openmrs.logging.OpenmrsLoggingUtil;
 import org.openmrs.module.MandatoryModuleException;
 import org.openmrs.module.Module;
 import org.openmrs.module.ModuleFactory;
 import org.openmrs.module.ModuleMustStartException;
+import org.openmrs.module.OpenmrsCoreModuleException;
 import org.openmrs.module.web.OpenmrsJspServlet;
 import org.openmrs.module.web.WebModuleUtil;
 import org.openmrs.scheduler.SchedulerUtil;
@@ -41,12 +43,12 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
-import jakarta.servlet.ServletContext;
-import jakarta.servlet.ServletContextEvent;
-import jakarta.servlet.ServletContextListener;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpSessionEvent;
-import jakarta.servlet.http.HttpSessionListener;
+import javax.servlet.ServletContext;
+import javax.servlet.ServletContextEvent;
+import javax.servlet.ServletContextListener;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpSessionEvent;
+import javax.servlet.http.HttpSessionListener;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
@@ -349,6 +351,11 @@ public final class Listener extends ContextLoader implements ServletContextListe
 		catch (MandatoryModuleException mandatoryModEx) {
 			throw new ServletException(mandatoryModEx);
 		}
+		catch (OpenmrsCoreModuleException coreModEx) {
+			// don't wrap this error in a ServletException because we want to deal with it differently
+			// in the StartupErrorFilter class
+			throw coreModEx;
+		}
 		
 		// TODO catch openmrs errors here and drop the user back out to the setup screen
 		
@@ -606,7 +613,7 @@ public final class Listener extends ContextLoader implements ServletContextListe
 	 * Called when the webapp is shut down properly Must call Context.shutdown() and then shutdown
 	 * all the web layers of the modules
 	 *
-	 * @see org.springframework.web.context.ContextLoaderListener#contextDestroyed(jakarta.servlet.ServletContextEvent)
+	 * @see org.springframework.web.context.ContextLoaderListener#contextDestroyed(javax.servlet.ServletContextEvent)
 	 */
 	@SuppressWarnings("squid:S1215")
 	@Override
@@ -685,7 +692,7 @@ public final class Listener extends ContextLoader implements ServletContextListe
 	 *
 	 * @param servletContext
 	 * @throws ModuleMustStartException if the context cannot restart due to a
-	 *             {@link MandatoryModuleException}
+	 *             {@link MandatoryModuleException} or {@link OpenmrsCoreModuleException}
 	 */
 	public static void performWebStartOfModules(ServletContext servletContext) throws ModuleMustStartException, Exception {
 		List<Module> startedModules = new ArrayList<>(ModuleFactory.getStartedModules());
@@ -728,7 +735,7 @@ public final class Listener extends ContextLoader implements ServletContextListe
 				try {
 					WebModuleUtil.shutdownModules(servletContext);
 					for (Module mod : ModuleFactory.getLoadedModules()) {// use loadedModules to avoid a concurrentmodificationexception
-						if (!mod.isMandatory()) {
+						if (!mod.isCoreModule() && !mod.isMandatory()) {
 							try {
 								ModuleFactory.stopModule(mod, true, true);
 							}
